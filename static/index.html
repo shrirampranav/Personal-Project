@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Options Signal Desk</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22%3E%3Cpath d=%22M1 12l4-5 3 3 6-8%22 stroke=%22%2326a69a%22 stroke-width=%222%22 fill=%22none%22/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">Options Signal Desk</div>
+  <div class="chips">
+    <span class="chip" id="providerChip">-</span>
+    <span class="chip" id="phaseChip">-</span>
+    <span class="chip">VIX <b id="vixVal">-</b></span>
+    <span class="chip">IST <b id="clock">-</b></span>
+    <span class="chip muted">scan <span id="lastScan">-</span></span>
+  </div>
+  <div class="actions">
+    <button id="notifyBtn" class="ghost" title="Browser notifications for BUY and EXIT alerts">Enable alerts</button>
+    <button id="soundBtn" class="ghost" title="Beep on BUY and EXIT alerts">Sound on</button>
+  </div>
+</header>
+
+<main class="layout">
+  <!-- Left: scanner + alerts -->
+  <aside class="col left">
+    <section class="card">
+      <div class="card-head">
+        <h2>Watchlist scanner</h2>
+      </div>
+      <form id="addForm" class="add-form">
+        <input id="addInput" placeholder="Add symbol e.g. TATAMOTORS" autocomplete="off" aria-label="Add symbol">
+        <button type="submit">Add</button>
+      </form>
+      <table class="scan">
+        <thead><tr><th>Symbol</th><th class="num">LTP</th><th class="num">Chg</th><th>Signal</th><th></th></tr></thead>
+        <tbody id="scanBody"></tbody>
+      </table>
+    </section>
+    <section class="card">
+      <div class="card-head"><h2>Alerts</h2><button id="clearAlerts" class="link">Clear</button></div>
+      <ul id="alerts" class="alerts"><li class="empty">No alerts yet. BUY, WATCH and EXIT signals appear here.</li></ul>
+    </section>
+  </aside>
+
+  <!-- Center: charts -->
+  <section class="col center">
+    <div class="card banner" id="banner">
+      <div class="banner-main">
+        <div>
+          <div class="sym-name" id="symName">-</div>
+          <div class="ltp"><span id="symLtp">-</span> <span id="symChg" class="chg"></span></div>
+        </div>
+        <div class="status-wrap">
+          <div class="status" id="statusPill">-</div>
+          <div class="score" id="scoreTxt"></div>
+        </div>
+      </div>
+      <div class="banner-msg" id="statusMsg"></div>
+    </div>
+    <div class="card chart-card">
+      <div class="legend">
+        <span><i style="background:var(--vwap)"></i>VWAP</span>
+        <span><i style="background:var(--ema9)"></i>EMA 9</span>
+        <span><i style="background:var(--ema21)"></i>EMA 21</span>
+        <span><i style="background:var(--up)"></i><i style="background:var(--down)"></i>Supertrend 10,3</span>
+        <span><i class="dash"></i>CPR / pivots</span>
+        <span class="muted">5-min, underlying</span>
+      </div>
+      <div id="chart5" class="chart main-chart"></div>
+      <div class="pane-label">RSI 14 <span class="muted">(40 / 60)</span></div>
+      <div id="chartRsi" class="chart rsi-chart"></div>
+    </div>
+    <div class="card chart-card">
+      <div class="legend"><span class="muted">15-min trend check: VWAP, EMA 21, Supertrend</span> <b id="trend15"></b></div>
+      <div id="chart15" class="chart small-chart"></div>
+    </div>
+  </section>
+
+  <!-- Right: checklist, plan, context -->
+  <aside class="col right">
+    <nav class="tabs" role="tablist">
+      <button class="tab active" data-tab="signal">Signal</button>
+      <button class="tab" data-tab="options">Options &amp; levels</button>
+      <button class="tab" data-tab="fund">Fundamentals</button>
+    </nav>
+
+    <div class="tabpane" id="tab-signal">
+      <section class="card">
+        <h2>Entry checklist</h2>
+        <table class="checklist">
+          <thead><tr><th>Condition</th><th class="c">Call</th><th class="c">Put</th></tr></thead>
+          <tbody id="checkBody"></tbody>
+        </table>
+        <div class="phase-row" id="phaseRow"></div>
+      </section>
+      <section class="card" id="planCard">
+        <h2>Trade plan</h2>
+        <div id="planBody" class="muted">No setup. Plan appears when 5 or 6 conditions align.</div>
+      </section>
+      <section class="card">
+        <h2>Warnings &amp; risk rules</h2>
+        <ul id="warnList" class="warn"></ul>
+      </section>
+    </div>
+
+    <div class="tabpane hidden" id="tab-options">
+      <section class="card">
+        <h2>Option chain <span class="muted" id="chainSrc"></span></h2>
+        <div class="kv-grid" id="chainKv"><span class="muted">Loading...</span></div>
+        <table class="chain">
+          <thead><tr><th class="num">CE OI</th><th class="num">CE LTP</th><th class="c">Strike</th><th class="num">PE LTP</th><th class="num">PE OI</th></tr></thead>
+          <tbody id="chainBody"></tbody>
+        </table>
+      </section>
+      <section class="card">
+        <h2>CPR &amp; pivots <span class="muted" id="cprWidth"></span></h2>
+        <div class="kv-grid" id="levelsKv"></div>
+      </section>
+    </div>
+
+    <div class="tabpane hidden" id="tab-fund">
+      <section class="card" id="fundCard"><span class="muted">Select a stock to load fundamentals.</span></section>
+    </div>
+  </aside>
+</main>
+
+<section class="card journal">
+  <div class="card-head">
+    <h2>Paper-trade journal</h2>
+    <div class="stats" id="stats"></div>
+  </div>
+  <div class="table-scroll">
+    <table class="trades">
+      <thead><tr><th>#</th><th>Time</th><th>Contract</th><th>Dir</th><th class="num">Entry spot</th><th class="num">SL</th><th class="num">Target</th><th class="num">Entry prem</th><th class="num">Lots</th><th class="num">Exit</th><th class="num">P&amp;L</th><th>Reason</th><th></th></tr></thead>
+      <tbody id="tradeBody"></tbody>
+    </table>
+  </div>
+</section>
+
+<footer class="foot">
+  Signals follow the rules in the "Intraday Options Indicator Setup" document. Alerts only; no orders are placed.
+  For educational purposes, not investment advice. Consult a SEBI-registered advisor before trading.
+  Charts: <a href="https://www.tradingview.com/" target="_blank" rel="noopener">TradingView Lightweight Charts</a>.
+</footer>
+
+<script src="/static/vendor/lightweight-charts.standalone.production.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>
