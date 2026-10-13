@@ -114,7 +114,8 @@ def is_choppy(df: pd.DataFrame) -> tuple[bool, str]:
     if 40 < last["rsi"] < 60:
         signs.append("RSI stuck between 40 and 60")
     if len(signs) >= 2:
-        return True, "; ".join(signs).capitalize()
+        msg = "; ".join(signs)
+        return True, msg[0].upper() + msg[1:]
     return False, ""
 
 
