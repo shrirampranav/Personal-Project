@@ -7,6 +7,7 @@ it never places orders.
 from __future__ import annotations
 
 import threading
+import time
 from datetime import timedelta
 
 import httpx
@@ -22,6 +23,12 @@ LOGIN = "/rest/auth/angelbroking/user/v1/loginByPassword"
 CANDLES = "/rest/secure/angelbroking/historical/v1/getCandleData"
 SEARCH = "/rest/secure/angelbroking/order/v1/searchScrip"
 LTP = "/rest/secure/angelbroking/order/v1/getLtpData"
+
+# Minimum seconds between calls per endpoint; SmartAPI allows ~3 candle calls/sec
+# and rejects bursts with a plain-text "exceeding access rate" reply.
+MIN_INTERVAL = {CANDLES: 0.4, SEARCH: 1.1, LTP: 0.2, LOGIN: 1.1}
+RETRIES = 3
+CANDLE_TTL = 8  # seconds; the scanner and the chart view share one fetch
 
 # Exchange tokens for NSE indices on SmartAPI
 INDEX_TOKENS = {
@@ -45,6 +52,8 @@ class AngelOneProvider(CandleProvider):
         self._jwt: str | None = None
         self._tokens: dict[str, tuple[str, str]] = dict(INDEX_TOKENS)
         self._lock = threading.Lock()
+        self._last_call: dict[str, float] = {}
+        self._candle_cache: dict[str, tuple[float, pd.DataFrame]] = {}
 
     def _headers(self) -> dict[str, str]:
         h = {
@@ -61,6 +70,26 @@ class AngelOneProvider(CandleProvider):
             h["Authorization"] = f"Bearer {self._jwt}"
         return h
 
+    def _throttle(self, path: str) -> None:
+        wait = self._last_call.get(path, 0) + MIN_INTERVAL.get(path, 0.2) - time.monotonic()
+        if wait > 0:
+            time.sleep(wait)
+        self._last_call[path] = time.monotonic()
+
+    def _send(self, path: str, body: dict) -> tuple[httpx.Response, dict | None]:
+        """POST with throttling. Returns (response, json or None if the body was not JSON)."""
+        self._throttle(path)
+        r = self.client.post(path, json=body, headers=self._headers())
+        try:
+            return r, r.json()
+        except ValueError:  # rate-limit and gateway errors come back as plain text
+            return r, None
+
+    @staticmethod
+    def _rate_limited(r: httpx.Response, data: dict | None) -> bool:
+        text = (data or {}).get("message") or ("" if data is not None else r.text)
+        return r.status_code == 429 or data is None or "exceed" in str(text).lower()
+
     def _login(self) -> None:
         body = {
             "clientcode": settings.angel_client_code,
@@ -68,26 +97,31 @@ class AngelOneProvider(CandleProvider):
             "totp": pyotp.TOTP(settings.angel_totp_secret).now(),
         }
         self._jwt = None
-        r = self.client.post(LOGIN, json=body, headers=self._headers())
-        data = r.json() if r.content else {}
-        if not data.get("status"):
-            raise ProviderError(f"Angel One login failed: {data.get('message') or r.status_code}")
+        r, data = self._send(LOGIN, body)
+        if not data or not data.get("status"):
+            reason = (data or {}).get("message") or r.text[:120] or r.status_code
+            raise ProviderError(f"Angel One login failed: {reason}")
         self._jwt = data["data"]["jwtToken"]
 
     def _post(self, path: str, body: dict) -> dict:
         with self._lock:
             if not self._jwt:
                 self._login()
-            for attempt in range(2):
-                r = self.client.post(path, json=body, headers=self._headers())
-                data = r.json() if r.content else {}
-                expired = r.status_code in (401, 403) or data.get("errorcode") in ("AG8001", "AG8002", "AG8003")
-                if expired and attempt == 0:
+            relogged = False
+            for attempt in range(RETRIES + 1):
+                r, data = self._send(path, body)
+                expired = r.status_code in (401, 403) or (data or {}).get("errorcode") in ("AG8001", "AG8002", "AG8003")
+                if expired and not relogged:
+                    relogged = True
                     self._login()
                     continue
-                if not data.get("status"):
-                    raise ProviderError(f"Angel One {path}: {data.get('message') or r.status_code}")
-                return data
+                if data and data.get("status"):
+                    return data
+                if self._rate_limited(r, data) and attempt < RETRIES:
+                    time.sleep(1.0 * (attempt + 1))
+                    continue
+                reason = (data or {}).get("message") or r.text[:120] or r.status_code
+                raise ProviderError(f"Angel One {path.rsplit('/', 1)[-1]}: {reason}")
         raise ProviderError("Angel One request failed")
 
     def _token(self, symbol: str) -> tuple[str, str]:
@@ -101,6 +135,10 @@ class AngelOneProvider(CandleProvider):
         return self._tokens[symbol]
 
     def candles(self, symbol: str, days: int = 5) -> pd.DataFrame:
+        symbol = symbol.upper()
+        hit = self._candle_cache.get(symbol)
+        if hit and time.monotonic() - hit[0] < CANDLE_TTL:
+            return hit[1]
         token, _ = self._token(symbol)
         now = now_ist()
         body = {
@@ -111,7 +149,9 @@ class AngelOneProvider(CandleProvider):
             "todate": now.strftime("%Y-%m-%d %H:%M"),
         }
         rows = [tuple(r[:6]) for r in self._post(CANDLES, body).get("data") or []]
-        return frame(rows)
+        df = frame(rows)
+        self._candle_cache[symbol] = (time.monotonic(), df)
+        return df
 
     def vix(self) -> float | None:
         token, name = INDEX_TOKENS["INDIAVIX"]

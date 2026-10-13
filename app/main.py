@@ -89,6 +89,9 @@ async def analysis(symbol: str) -> dict:
         result = await run_in_threadpool(e.analyze, symbol.upper(), True)
     except ProviderError as err:
         raise HTTPException(502, str(err))
+    except Exception as err:  # unexpected data-source reply; show the reason in the UI
+        log.exception("analysis %s failed", symbol)
+        raise HTTPException(502, f"Data source error: {err}")
     if result.get("status") == "ERROR":
         raise HTTPException(422, result.get("message"))
     return public(result) | {"chart": chart_payload(result)}
