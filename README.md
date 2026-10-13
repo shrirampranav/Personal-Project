@@ -67,7 +67,9 @@ Open http://localhost:8000. The first run creates `.env` from `.env.example`.
 |---|---|---|
 | `demo` | none | Simulated market. Outside market hours it replays a full session at 60× speed, so you can watch alerts fire any time. |
 | `yahoo` | none | Free NSE candles and India VIX. Can lag by about a minute. |
-| `angelone` | SmartAPI key, client code, MPIN, TOTP secret | Real-time candles from your Angel One account. Create an app at https://smartapi.angelone.in. Use the base32 TOTP secret, not the 6-digit code. |
+| `angelone` | SmartAPI key, client code, MPIN, TOTP secret, static IP | Real-time data from your Angel One account. Prices stream tick by tick over Angel One's live WebSocket feed (`LIVE_TICKS=true`, the default), like the Angel One app. Create an app at https://smartapi.angelone.in and use the base32 TOTP secret, not the 6-digit code. |
+
+With live ticks on, a green **LIVE** chip in the top bar means the feed is streaming. Prices, % change and the forming candle update instantly, while signals are still confirmed on completed 5-minute candles.
 
 The option chain comes from NSE's public API (`OPTION_CHAIN_PROVIDER=auto`). NSE sometimes blocks automated requests. When it does, the app keeps working without OI/PCR, and you can type the premium into the position calculator.
 

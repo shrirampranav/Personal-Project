@@ -107,3 +107,25 @@ class DemoProvider(CandleProvider):
         d = self._session_day(self.now())
         return round(11 + _seed("vix", d) % 900 / 100, 2)
 
+
+
+class DemoTickStream:
+    """Simulated tick feed: small moves around each symbol's latest candle close."""
+
+    def __init__(self, on_tick, symbols, last_price, every: float = 0.4) -> None:
+        self.on_tick, self.symbols, self.last_price, self.every = on_tick, symbols, last_price, every
+        self.connected = True
+        self._rng = np.random.default_rng()
+
+    async def run(self) -> None:
+        import asyncio
+        drift: dict[str, float] = {}
+        while True:
+            await asyncio.sleep(self.every)
+            for sym in list(self.symbols()):
+                base = self.last_price(sym)
+                if not base or self._rng.random() < 0.4:  # not every symbol trades every interval
+                    continue
+                drift[sym] = 0.8 * drift.get(sym, 0.0) + self._rng.normal(0, 0.0002)
+                # ts 0: the demo chart replays a simulated session, so ticks only move the forming candle
+                self.on_tick(sym, round(base * (1 + drift[sym]), 2), 0)

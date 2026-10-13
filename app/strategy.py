@@ -284,6 +284,7 @@ def evaluate(raw: pd.DataFrame, inst: Instrument, now: datetime, ctx: Context, c
         "time": df.index[-1].strftime("%Y-%m-%d %H:%M"), "now": now.strftime("%Y-%m-%d %H:%M:%S"),
         "ltp": round(float(full["close"].iloc[-1]), 2),
         "change_pct": round((float(full["close"].iloc[-1]) / p["close"] - 1) * 100, 2),
+        "prev_close": round(float(p["close"]), 2),
         "phase": phase, "phase_msg": phase_msg, "expiry_day": expiry_day,
         "checks": checks, "plan": plan, "warnings": warnings,
         "levels": {k: round(v, 2) for k, v in levels.items()},

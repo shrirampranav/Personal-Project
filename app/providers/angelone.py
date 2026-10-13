@@ -50,6 +50,7 @@ class AngelOneProvider(CandleProvider):
             raise ProviderError("Angel One credentials missing in .env: " + ", ".join(m.upper() for m in missing))
         self.client = httpx.Client(base_url=BASE, timeout=20)
         self._jwt: str | None = None
+        self._feed: str | None = None
         self._tokens: dict[str, tuple[str, str]] = dict(INDEX_TOKENS)
         self._lock = threading.Lock()
         self._last_call: dict[str, float] = {}
@@ -102,6 +103,16 @@ class AngelOneProvider(CandleProvider):
             reason = (data or {}).get("message") or r.text[:120] or r.status_code
             raise ProviderError(f"Angel One login failed: {reason}")
         self._jwt = data["data"]["jwtToken"]
+        self._feed = data["data"].get("feedToken")
+
+    def stream_credentials(self, force: bool = False) -> tuple[str, str]:
+        """(jwt, feed token) for the live WebSocket feed; logs in again when forced."""
+        with self._lock:
+            if force or not self._jwt or not self._feed:
+                self._login()
+            if not self._feed:
+                raise ProviderError("Angel One login returned no feed token")
+            return self._jwt, self._feed
 
     def _post(self, path: str, body: dict) -> dict:
         with self._lock:

@@ -41,10 +41,21 @@ engine: Engine | None = None
 async def lifespan(app: FastAPI):
     global engine
     engine = build_engine()
-    task = asyncio.create_task(engine.run())
-    log.info("Provider: %s | watchlist: %s", engine.provider.name, ", ".join(settings.watchlist))
+    tasks = [asyncio.create_task(engine.run()), asyncio.create_task(engine.flush_ticks())]
+    if engine.provider.name == "angelone" and settings.live_ticks:
+        from .providers.angel_stream import AngelTickStream
+        engine.stream = AngelTickStream(engine.provider, engine.on_tick, lambda: settings.watchlist)
+        tasks.append(asyncio.create_task(engine.stream.run()))
+    elif engine.provider.name == "demo" and settings.live_ticks:
+        from .providers.demo import DemoTickStream
+        engine.stream = DemoTickStream(engine.on_tick, lambda: settings.watchlist,
+                                       lambda s: (engine.results.get(s) or {}).get("ltp"))
+        tasks.append(asyncio.create_task(engine.stream.run()))
+    log.info("Provider: %s | live ticks: %s | watchlist: %s", engine.provider.name,
+             "on" if engine.stream else "off", ", ".join(settings.watchlist))
     yield
-    task.cancel()
+    for t in tasks:
+        t.cancel()
 
 
 app = FastAPI(title="Intraday Options Signal Desk", lifespan=lifespan)
@@ -73,6 +84,7 @@ def get_config() -> dict:
         "capital": settings.capital, "risk_per_trade_pct": settings.risk_per_trade_pct,
         "max_losing_trades": settings.max_losing_trades_per_day, "premium_stop_pct": settings.premium_stop_pct,
         "refresh_seconds": settings.refresh_seconds, "telegram": bool(settings.telegram_token),
+        "live_ticks": bool(e.stream),
     }
 
 
