@@ -82,6 +82,9 @@
       priceLines.push(candles.createPriceLine({ price: d.chain.support, title: "Max PE OI", color: css("--warn"), lineWidth: 1, lineStyle: 3, axisLabelVisible: false }));
     }
     const last = ch.candles[ch.candles.length - 1];
+    state.lastCandle = last ? { ...last } : null;
+    const live = livePrice(d.symbol);
+    if (live?.ltp) tickCandle(live.ltp, 0);
     const markers = [];
     if (d.status === "BUY_CALL" && last) markers.push({ time: last.time, position: "belowBar", color: up, shape: "arrowUp", text: "CALL" });
     if (d.status === "BUY_PUT" && last) markers.push({ time: last.time, position: "aboveBar", color: down, shape: "arrowDown", text: "PUT" });
@@ -106,8 +109,8 @@
       const chg = r.change_pct;
       return `<tr data-sym="${esc(r.symbol)}" class="${r.symbol === state.selected ? "sel" : ""}" title="${esc(r.message || "")}">
         <td class="sym">${esc(r.symbol)}</td>
-        <td class="num">${fmt(r.ltp)}</td>
-        <td class="num ${chg >= 0 ? "up" : "down"}">${chg === undefined || chg === null ? "-" : (chg >= 0 ? "+" : "") + fmt(chg) + "%"}</td>
+        <td class="num px">${fmt(r.ltp)}</td>
+        <td class="num chgc ${chg >= 0 ? "up" : "down"}">${chg === undefined || chg === null ? "-" : (chg >= 0 ? "+" : "") + fmt(chg) + "%"}</td>
         <td><span class="pill ${esc(r.status)}">${esc(STATUS_TEXT[r.status] || r.status)}</span></td>
         <td><button class="rm" data-rm="${esc(r.symbol)}" title="Remove">&times;</button></td></tr>`;
     }).join("");
@@ -115,12 +118,18 @@
 
   function tick(on, bear) { return `<span class="tick ${on ? "yes" : "no"} ${bear ? "bear" : ""}">${on ? "&#10003;" : "&#10005;"}</span>`; }
 
+  // the scanner row carries the latest streamed price; candle data can trail it by seconds
+  const livePrice = (sym) => (state.config?.live_ticks ? state.rows.find((r) => r.symbol === sym) : null);
+
   function renderSignal(d) {
+    const live = livePrice(d.symbol);
+    const ltp = live?.ltp ?? d.ltp, chgPct = live?.change_pct ?? d.change_pct;
     $("symName").textContent = d.symbol + (d.expiry_day ? "  (expiry day)" : "");
-    $("symLtp").textContent = fmt(d.ltp);
+    $("symLtp").textContent = fmt(ltp);
+    $("symLtp").dataset.v = ltp;
     const chg = $("symChg");
-    chg.textContent = (d.change_pct >= 0 ? "+" : "") + fmt(d.change_pct) + "%";
-    chg.className = "chg " + (d.change_pct >= 0 ? "up" : "down");
+    chg.textContent = (chgPct >= 0 ? "+" : "") + fmt(chgPct) + "%";
+    chg.className = "chg " + (chgPct >= 0 ? "up" : "down");
     const pill = $("statusPill");
     pill.textContent = STATUS_TEXT[d.status] || d.status;
     pill.className = "status " + d.status;
@@ -373,6 +382,70 @@
   $("soundBtn").onclick = () => { state.sound = !state.sound; $("soundBtn").textContent = state.sound ? "Sound on" : "Sound off"; };
   $("clearAlerts").onclick = () => { $("alerts").innerHTML = '<li class="empty">No alerts.</li>'; };
 
+  // ---------- live ticks ----------
+  const IST_OFFSET = 19800;
+  const fmtChg = (c) => (c >= 0 ? "+" : "") + fmt(c) + "%";
+
+  function flash(el, dir) {
+    if (!el || !dir) return;
+    el.classList.remove("flash-up", "flash-down");
+    void el.offsetWidth; // restart the animation
+    el.classList.add(dir === "up" ? "flash-up" : "flash-down");
+  }
+
+  function tickCandle(ltp, ts) {
+    const last = state.lastCandle;
+    if (!last) return;
+    let c = { ...last, close: ltp, high: Math.max(last.high, ltp), low: Math.min(last.low, ltp) };
+    if (ts) {
+      const sec = Math.floor(ts / 1000) + IST_OFFSET;
+      const bucket = sec - (sec % 300);
+      if (bucket > last.time && bucket - last.time <= 600) c = { time: bucket, open: ltp, high: ltp, low: ltp, close: ltp };
+    }
+    candles.update(c);
+    state.lastCandle = c;
+  }
+
+  function applyTicks(ticks) {
+    state.lastTick = Date.now();
+    for (const [sym, t] of Object.entries(ticks)) {
+      const row = state.rows.find((r) => r.symbol === sym);
+      const prevClose = t.prev_close || row?.prev_close;
+      const chg = prevClose ? (t.ltp / prevClose - 1) * 100 : null;
+      if (row) {
+        const dir = row.ltp == null ? "" : t.ltp > row.ltp ? "up" : t.ltp < row.ltp ? "down" : "";
+        row.ltp = t.ltp;
+        if (chg !== null) row.change_pct = chg;
+        const tr = $("scanBody").querySelector(`tr[data-sym="${CSS.escape(sym)}"]`);
+        if (tr) {
+          const ltpCell = tr.querySelector(".px"), chgCell = tr.querySelector(".chgc");
+          ltpCell.textContent = fmt(t.ltp);
+          flash(ltpCell, dir);
+          if (chg !== null) { chgCell.textContent = fmtChg(chg); chgCell.className = "num chgc " + (chg >= 0 ? "up" : "down"); }
+        }
+      }
+      if (sym === state.selected && state.data) {
+        const el = $("symLtp");
+        const prev = parseFloat(el.dataset.v || "0");
+        el.textContent = fmt(t.ltp);
+        el.dataset.v = t.ltp;
+        flash(el, t.ltp > prev ? "up" : t.ltp < prev ? "down" : "");
+        if (chg !== null) { const c = $("symChg"); c.textContent = fmtChg(chg); c.className = "chg " + (chg >= 0 ? "up" : "down"); }
+        tickCandle(t.ltp, t.ts);
+      }
+    }
+  }
+
+  function updateLiveChip() {
+    const chip = $("liveChip");
+    if (!state.config?.live_ticks) { chip.classList.add("hidden"); return; }
+    chip.classList.remove("hidden");
+    const fresh = state.lastTick && Date.now() - state.lastTick < 5000;
+    chip.classList.toggle("on", !!fresh);
+    chip.lastChild.textContent = fresh ? "LIVE" : "LIVE (waiting for ticks)";
+  }
+  setInterval(updateLiveChip, 1000);
+
   function connect() {
     const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
     ws.onmessage = (ev) => {
@@ -384,6 +457,8 @@
         $("lastScan").textContent = msg.last_scan || "-";
         loadAnalysis();
         loadTrades();
+      } else if (msg.type === "ticks") {
+        applyTicks(msg.ticks);
       } else if (msg.type === "alert") {
         addAlert(msg.alert, true);
       }
@@ -400,6 +475,7 @@
     connect();
     loadAnalysis();
     loadTrades();
+    updateLiveChip();
   }
   init();
 })();

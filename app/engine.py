@@ -34,6 +34,9 @@ class Engine:
         self._last_status: dict[str, str] = {}
         self._position_alerts: set[tuple[int, str]] = set()
         self.last_scan: str | None = None
+        self.live: dict[str, tuple[float, int]] = {}   # symbol -> (ltp, exchange ts ms) from the tick feed
+        self._pending_ticks: dict[str, tuple[float, int]] = {}
+        self.stream = None  # set when a live tick feed is running
 
     # ---- analysis ---------------------------------------------------------------
     def _chain(self, symbol: str, spot: float) -> dict | None:
@@ -113,7 +116,8 @@ class Engine:
             r = self.results.get(t["symbol"])
             if not r or r.get("status") == "ERROR":
                 continue
-            price, call = r["ltp"], t["direction"] == "CALL"
+            price = self.live.get(t["symbol"], (r["ltp"],))[0]
+            call = t["direction"] == "CALL"
             reasons = []
             stop, target = t["stop_underlying"], t["target_underlying"]
             if stop and (price <= stop if call else price >= stop):
@@ -131,6 +135,21 @@ class Engine:
         return out
 
     # ---- views ------------------------------------------------------------------
+    # ---- live ticks ---------------------------------------------------------------
+    def on_tick(self, symbol: str, ltp: float, ts: int) -> None:
+        self.live[symbol] = (ltp, ts)
+        self._pending_ticks[symbol] = (ltp, ts)
+
+    async def flush_ticks(self, every: float = 0.2) -> None:
+        """Push batched ticks to browsers several times a second."""
+        while True:
+            await asyncio.sleep(every)
+            if self._pending_ticks and self.clients:
+                batch, self._pending_ticks = self._pending_ticks, {}
+                await self.broadcast({"type": "ticks", "ticks": {
+                    s: {"ltp": p, "ts": t, "prev_close": (self.results.get(s) or {}).get("prev_close")}
+                    for s, (p, t) in batch.items()}})
+
     def summary(self) -> list[dict]:
         rows = []
         for sym in self.cfg.watchlist:
@@ -138,8 +157,13 @@ class Engine:
             if sym in self.errors or not r:
                 rows.append({"symbol": sym, "status": "ERROR", "message": self.errors.get(sym, "Loading...")})
                 continue
-            rows.append(jsonable({k: r.get(k) for k in ("symbol", "kind", "ltp", "change_pct", "status", "message", "score",
-                                              "rsi", "trend15", "phase", "time", "expiry_day")}))
+            row = jsonable({k: r.get(k) for k in ("symbol", "kind", "ltp", "change_pct", "prev_close", "status",
+                                                  "message", "score", "rsi", "trend15", "phase", "time", "expiry_day")})
+            live = self.live.get(sym)
+            if live and row.get("prev_close"):
+                row["ltp"] = live[0]
+                row["change_pct"] = round((live[0] / row["prev_close"] - 1) * 100, 2)
+            rows.append(row)
         return rows
 
     async def broadcast(self, payload: dict) -> None:

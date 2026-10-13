@@ -42,6 +42,15 @@ input { font: inherit; background: var(--bg); color: var(--text); border: 1px so
 .chips { display: flex; gap: 8px; flex-wrap: wrap; flex: 1; }
 .chip { border: 1px solid var(--border); border-radius: 999px; padding: 2px 10px; font-size: 12px; white-space: nowrap; }
 .actions { display: flex; gap: 8px; }
+.chip.live { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+.chip.live i { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.chip.live.on { color: var(--up); border-color: var(--up); }
+.chip.live.on i { background: var(--up); animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .3; } }
+@keyframes flashUp { from { background: rgba(38, 166, 154, .35); } to { background: transparent; } }
+@keyframes flashDown { from { background: rgba(239, 83, 80, .35); } to { background: transparent; } }
+.flash-up { animation: flashUp .6s ease-out; border-radius: 4px; }
+.flash-down { animation: flashDown .6s ease-out; border-radius: 4px; }
 
 .layout { display: grid; grid-template-columns: 320px minmax(0, 1fr) 360px; gap: 12px; padding: 12px 16px; }
 .col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }

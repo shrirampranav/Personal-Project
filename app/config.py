@@ -35,6 +35,8 @@ class Settings:
     watchlist: list[str] = field(default_factory=lambda: _list(
         "WATCHLIST", "NIFTY,BANKNIFTY,RELIANCE,HDFCBANK,ICICIBANK,INFY,TCS,SBIN"))
     refresh_seconds: float = field(default_factory=lambda: _float("REFRESH_SECONDS", 30))
+    # Stream live ticks over Angel One's WebSocket (angelone provider only)
+    live_ticks: bool = field(default_factory=lambda: _env("LIVE_TICKS", "true").lower() not in ("0", "false", "no", "off"))
 
     # Risk rules (from the setup document)
     capital: float = field(default_factory=lambda: _float("CAPITAL", 200000))
